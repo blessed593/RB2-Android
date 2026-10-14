@@ -26,7 +26,8 @@ jobs:
             clang cmake ninja-build \
             openjdk-17-jdk \
             unzip zip wget curl \
-            build-essential pkg-config
+            build-essential pkg-config \
+            spirv-cross
 
       - name: Configure Java
         run: |
@@ -48,6 +49,7 @@ jobs:
           set -eux
           test -f tools/android/prepare_sdk.sh
           test -f tools/android/build_host_cli.sh
+          test -f tools/android/codegen.sh
           test -f tools/android/build_native.sh
           test -f tools/android/build_apk.sh
 
@@ -58,12 +60,15 @@ jobs:
         run: bash tools/android/build_host_cli.sh
 
       - name: Build APK
+        env:
+          RB2_GAME: ${{ vars.RB2_GAME }}
         run: |
-          if [ -z "${RB2_GAME:-}" ]; then
-            echo "A pasta do jogo não foi configurada."
-            echo "É necessário fornecer os dados próprios e compatíveis do jogo."
+          if [ -z "$RB2_GAME" ]; then
+            echo "RB2_GAME não foi configurado."
+            echo "A compilação precisa dos dados próprios do jogo."
             exit 1
           fi
+
           bash tools/android/codegen.sh "$RB2_GAME"
           bash tools/android/build_native.sh
           bash tools/android/build_apk.sh
