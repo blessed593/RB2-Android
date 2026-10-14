@@ -1,0 +1,78 @@
+name: Build RB2 Android
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compile Android APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git python3 python3-pip \
+            clang cmake ninja-build \
+            openjdk-17-jdk \
+            unzip zip wget curl \
+            build-essential pkg-config
+
+      - name: Configure Java
+        run: |
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android build tools
+        run: |
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+          sdkmanager "ndk;28.2.13676358"
+          sdkmanager "cmake;3.31.6"
+          sdkmanager "platform-tools"
+
+      - name: Check project scripts
+        run: |
+          set -eux
+          test -f tools/android/prepare_sdk.sh
+          test -f tools/android/build_host_cli.sh
+          test -f tools/android/build_native.sh
+          test -f tools/android/build_apk.sh
+
+      - name: Prepare ReXGlue SDK
+        run: bash tools/android/prepare_sdk.sh
+
+      - name: Build host recompiler
+        run: bash tools/android/build_host_cli.sh
+
+      - name: Build APK
+        run: |
+          if [ -z "${RB2_GAME:-}" ]; then
+            echo "A pasta do jogo não foi configurada."
+            echo "É necessário fornecer os dados próprios e compatíveis do jogo."
+            exit 1
+          fi
+          bash tools/android/codegen.sh "$RB2_GAME"
+          bash tools/android/build_native.sh
+          bash tools/android/build_apk.sh
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RB2-Android-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
