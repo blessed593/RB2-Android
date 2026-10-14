@@ -1,63 +1,314 @@
-diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
---- a/src/input/sdl/sdl_input_driver.cpp
-+++ b/src/input/sdl/sdl_input_driver.cpp
-@@ -10,6 +10,7 @@
- #include <array>
- #include <filesystem>
-+#include <string>
- #include <rex/assert.h>
- #include <rex/chrono/clock.h>
- #include <rex/cvar.h>
-@@ -100,6 +101,52 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
-           }
-         }
-       }
-+
-+      // Register an SDL gamepad mapping for the iPega PG-9021.
-+      // Android identifies this controller as vendor 6473, product 1026.
-+      int joystick_count = 0;
-+      SDL_JoystickID* joystick_ids = SDL_GetJoysticks(&joystick_count);
-+      if (joystick_ids) {
-+        for (int i = 0; i < joystick_count; ++i) {
-+          const SDL_JoystickID joystick_id = joystick_ids[i];
-+          SDL_Joystick* joystick = SDL_OpenJoystick(joystick_id);
-+          if (!joystick) {
-+            continue;
-+          }
-+
-+          const Uint16 vendor = SDL_GetJoystickVendor(joystick);
-+          const Uint16 product = SDL_GetJoystickProduct(joystick);
-+
-+          if (vendor == 6473 && product == 1026 &&
-+              !SDL_IsGamepad(joystick_id)) {
-+            char guid_text[33] = {};
-+            SDL_GUIDToString(
-+                SDL_GetJoystickGUID(joystick), guid_text,
-+                static_cast<int>(sizeof(guid_text)));
-+
-+            std::string mapping =
-+                std::string(guid_text) +
-+                ",iPega PG-9021,"
-+                "a:b0,b:b1,x:b2,y:b3,"
-+                "back:b4,start:b6,"
-+                "leftstick:b7,rightstick:b8,"
-+                "leftshoulder:b9,rightshoulder:b10,"
-+                "dpup:h0.1,dpdown:h0.4,"
-+                "dpleft:h0.8,dpright:h0.2,"
-+                "leftx:a0,lefty:a1,"
-+                "rightx:a2,righty:a3";
-+
-+            const int axes = SDL_GetNumJoystickAxes(joystick);
-+            if (axes >= 6) {
-+              mapping += ",lefttrigger:+a4,righttrigger:+a5";
-+            }
-+
-+            SDL_AddGamepadMapping(mapping.c_str());
-+          }
-+
-+          SDL_CloseJoystick(joystick);
-+        }
-+        SDL_free(joystick_ids);
-+      }
-+
-       REXLOG_INFO("SDL input driver initialized successfully");
+name: Diagnose RB2 Android
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Test Android and ReXGlue builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+        with:
+          ref: android
+          submodules: recursive
+
+      - name: Install Clang 20
+        run: |
+          set -eux
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget \
+            ca-certificates \
+            gnupg \
+            lsb-release
+
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+
+          sudo apt-get install -y clang-20 lld-20
+
+          clang-20 --version
+          clang++-20 --version
+
+      - name: Install build dependencies
+        run: |
+          set -eux
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            git \
+            python3 \
+            python3-pip \
+            python3-venv \
+            cmake \
+            ninja-build \
+            openjdk-17-jdk \
+            unzip \
+            zip \
+            curl \
+            build-essential \
+            pkg-config \
+            spirv-cross \
+            libgtk-3-dev \
+            libasound2-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxfixes-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxss-dev \
+            libxtst-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxcb1-dev \
+            libxcb-randr0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-shape0-dev \
+            libxcb-xinput-dev \
+            libwayland-dev \
+            libwayland-egl-backend-dev \
+            wayland-protocols \
+            libegl1-mesa-dev
+
+      - name: Configure Java
+        run: |
+          set -eux
+
+          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+
+          java -version
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK components
+        run: |
+          set -eux
+
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.31.6"
+
+          yes | sdkmanager --licenses || true
+
+      - name: Configure Android SDK paths
+        run: |
+          set -eux
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          if [ ! -e "$HOME/android-sdk" ]; then
+            ln -s "$ANDROID_HOME" "$HOME/android-sdk"
+          fi
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          GLSLC="$NDK/shader-tools/linux-x86_64/glslc"
+
+          if [ ! -x "$GLSLC" ]; then
+            echo "::error::glslc was not found."
+            find "$NDK" -type f -name glslc -print || true
+            exit 1
+          fi
+
+          "$GLSLC" --version
+
+      - name: Check project scripts
+        run: |
+          set -eux
+
+          test -f tools/android/prepare_sdk.sh
+          test -f tools/android/build_host_cli.sh
+          test -f tools/android/build_native.sh
+
+          echo "Project scripts found."
+
+      - name: Prepare ReXGlue SDK
+        run: |
+          set -eux
+
+          bash tools/android/prepare_sdk.sh
+
+      - name: Test Android Vulkan probe
+        id: probe
+        continue-on-error: true
+        env:
+          JOBS: "2"
+          PROBE_ONLY: "1"
+        run: |
+          set -eux
+
+          bash tools/android/build_native.sh
+
+          LIB="android/app/src/main/jniLibs/arm64-v8a/librb2probe.so"
+
+          if [ ! -f "$LIB" ]; then
+            echo "::error::Vulkan probe library was not generated."
+            exit 1
+          fi
+
+          ls -lh "$LIB"
+
+      - name: Configure host compiler
+        id: host_config
+        if: always()
+        continue-on-error: true
+        run: |
+          set -eux
+
+          SCRIPT="tools/android/build_host_cli.sh"
+
+          python3 - "$SCRIPT" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          content = path.read_text()
+
+          old = "cmake --preset linux-amd64"
+          new = (
+              "cmake --preset linux-amd64 "
+              "-DCMAKE_C_COMPILER=clang-20 "
+              "-DCMAKE_CXX_COMPILER=clang++-20"
+          )
+
+          if new in content:
+              print("Clang 20 is already configured.")
+          elif content.count(old) == 1:
+              path.write_text(content.replace(old, new, 1))
+              print("Configured host build to use Clang 20.")
+          else:
+              raise SystemExit(
+                  "Could not safely identify the expected CMake command."
+              )
+          PY
+
+          grep -n "cmake --preset linux-amd64" "$SCRIPT"
+
+      - name: Test host recompiler
+        id: host
+        if: always() && steps.host_config.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -eux
+
+          clang-20 --version
+          clang++-20 --version
+
+          bash tools/android/build_host_cli.sh
+
+          CLI="../rexglue-sdk-android/out/linux-amd64/Release/rexglue"
+
+          if [ ! -x "$CLI" ]; then
+            echo "::error::The host recompiler was not generated."
+            exit 1
+          fi
+
+          ls -lh "$CLI"
+
+      - name: Collect diagnostic information
+        if: always()
+        run: |
+          set -u
+
+          mkdir -p diagnostic-results/build-logs
+          mkdir -p diagnostic-results/files
+
+          {
+            echo "RB2 Android build diagnostics"
+            echo "Date: $(date -u)"
+            echo "Runner: Ubuntu 24.04"
+            echo
+            echo "=== Compiler versions ==="
+            clang-20 --version || true
+            clang++-20 --version || true
+            cmake --version || true
+            ninja --version || true
+            java -version 2>&1 || true
+            echo
+            echo "=== Probe result ==="
+            echo "${{ steps.probe.outcome }}"
+            echo
+            echo "=== Host recompiler result ==="
+            echo "${{ steps.host.outcome }}"
+            echo
+            echo "=== Generated libraries ==="
+            find android/app/src/main/jniLibs/arm64-v8a \
+              -maxdepth 1 -type f -name "*.so" -print 2>/dev/null || true
+            echo
+            echo "=== Host recompiler output ==="
+            find ../rexglue-sdk-android/out/linux-amd64/Release \
+              -maxdepth 1 -type f -name "rexglue" -print 2>/dev/null || true
+          } > diagnostic-results/report.txt
+
+          cat diagnostic-results/report.txt
+
+          if [ -f android/app/src/main/jniLibs/arm64-v8a/librb2probe.so ]; then
+            cp android/app/src/main/jniLibs/arm64-v8a/librb2probe.so \
+              diagnostic-results/files/
+          fi
+
+          CLI="../rexglue-sdk-android/out/linux-amd64/Release/rexglue"
+
+          if [ -f "$CLI" ]; then
+            cp "$CLI" diagnostic-results/files/
+          fi
+
+          if [ -d android/native-build ]; then
+            find android/native-build \
+              -type f \( \
+                -name "CMakeCache.txt" -o \
+                -name "build.ninja" -o \
+                -name "ninja_log" \
+              \) \
+              -exec cp --parents {} diagnostic-results/build-logs/ \; \
+              2>/dev/null || true
+          fi
+
+          if [ -d ../rexglue-sdk-android/out ]; then
+            find ../rexglue-sdk-android/out \
+              -type f \( \
+                -name "CMakeCache.txt" -o \
+                -name "build.ninja" -o \
+                -name "ninja_log" \
+              \) \
+              -exec cp --parents {} diagnostic-results/build-logs/ \; \
+              2>/dev/null || true
+          fi
+
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RB2-Android-Diagnostics
+          path: diagnostic-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Report final status
+        if: always()
+        run: |
+          echo "Vulkan probe: ${{ steps.probe.outcome }}"
+          echo "Host compiler test: ${{ steps.host.outcome }}"
+
+          if [ "${{ steps.probe.outcome }}" != "success" ] || \
+             [ "${{ steps.host.outcome }}" != "success" ]; then
+            echo "::warning::One or more diagnostic tests failed. Inspect the logs and artifact."
+          fi
