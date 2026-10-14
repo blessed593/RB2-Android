@@ -1,4 +1,4 @@
-name: Build RB2 Android
+name: Diagnose RB2 Android
 
 on:
   workflow_dispatch:
@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Compile Android APK
+  diagnose:
+    name: Test Android and ReXGlue builds
     runs-on: ubuntu-24.04
     timeout-minutes: 360
 
@@ -41,11 +41,12 @@ jobs:
           clang-20 --version
           clang++-20 --version
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           set -eux
 
           sudo apt-get update
+
           sudo apt-get install -y \
             git \
             python3 \
@@ -56,7 +57,6 @@ jobs:
             openjdk-17-jdk \
             unzip \
             zip \
-            wget \
             curl \
             build-essential \
             pkg-config \
@@ -97,7 +97,7 @@ jobs:
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android build tools
+      - name: Install Android SDK components
         run: |
           set -eux
 
@@ -110,7 +110,7 @@ jobs:
 
           yes | sdkmanager --licenses || true
 
-      - name: Configure Android SDK path
+      - name: Configure Android SDK paths
         run: |
           set -eux
 
@@ -125,14 +125,12 @@ jobs:
           GLSLC="$NDK/shader-tools/linux-x86_64/glslc"
 
           if [ ! -x "$GLSLC" ]; then
-            echo "::error::glslc não encontrado no caminho esperado."
+            echo "::error::glslc was not found."
             find "$NDK" -type f -name glslc -print || true
             exit 1
           fi
 
           "$GLSLC" --version
-
-          echo "Android SDK e NDK configurados."
 
       - name: Check project scripts
         run: |
@@ -140,11 +138,9 @@ jobs:
 
           test -f tools/android/prepare_sdk.sh
           test -f tools/android/build_host_cli.sh
-          test -f tools/android/codegen.sh
           test -f tools/android/build_native.sh
-          test -f tools/android/build_apk.sh
 
-          echo "Todos os scripts foram encontrados."
+          echo "Project scripts found."
 
       - name: Prepare ReXGlue SDK
         run: |
@@ -152,7 +148,30 @@ jobs:
 
           bash tools/android/prepare_sdk.sh
 
-      - name: Configure ReXGlue compiler
+      - name: Test Android Vulkan probe
+        id: probe
+        continue-on-error: true
+        env:
+          JOBS: "2"
+          PROBE_ONLY: "1"
+        run: |
+          set -eux
+
+          bash tools/android/build_native.sh
+
+          LIB="android/app/src/main/jniLibs/arm64-v8a/librb2probe.so"
+
+          if [ ! -f "$LIB" ]; then
+            echo "::error::Vulkan probe library was not generated."
+            exit 1
+          fi
+
+          ls -lh "$LIB"
+
+      - name: Configure host compiler
+        id: host_config
+        if: always()
+        continue-on-error: true
         run: |
           set -eux
 
@@ -173,20 +192,22 @@ jobs:
           )
 
           if new in content:
-              print("O script já está configurado para Clang 20.")
+              print("Clang 20 is already configured.")
           elif content.count(old) == 1:
               path.write_text(content.replace(old, new, 1))
-              print("Script configurado para usar Clang 20.")
+              print("Configured host build to use Clang 20.")
           else:
               raise SystemExit(
-                  "Não foi possível identificar com segurança "
-                  "o comando CMake esperado no script."
+                  "Could not safely identify the expected CMake command."
               )
           PY
 
           grep -n "cmake --preset linux-amd64" "$SCRIPT"
 
-      - name: Build host recompiler
+      - name: Test host recompiler
+        id: host
+        if: always() && steps.host_config.outcome == 'success'
+        continue-on-error: true
         run: |
           set -eux
 
@@ -195,47 +216,79 @@ jobs:
 
           bash tools/android/build_host_cli.sh
 
-      - name: Build APK
-        env:
-          RB2_GAME: ${{ vars.RB2_GAME }}
+          CLI="../rexglue-sdk-android/out/linux-amd64/Release/rexglue"
+
+          if [ ! -x "$CLI" ]; then
+            echo "::error::The host recompiler was not generated."
+            exit 1
+          fi
+
+          ls -lh "$CLI"
+
+      - name: Collect diagnostic information
+        if: always()
         run: |
-          set -eux
+          mkdir -p diagnostic-results
 
-          if [ -z "$RB2_GAME" ]; then
-            echo "::error::A variável RB2_GAME não foi configurada."
-            echo "Configure o acesso aos arquivos próprios do jogo."
-            exit 1
-          fi
+          {
+            echo "RB2 Android build diagnostics"
+            echo "Date: $(date -u)"
+            echo "Runner: Ubuntu 24.04"
+            echo
+            echo "=== Compiler versions ==="
+            clang-20 --version || true
+            clang++-20 --version || true
+            cmake --version || true
+            ninja --version || true
+            java -version 2>&1 || true
+            echo
+            echo "=== Probe result ==="
+            echo "${{ steps.probe.outcome }}"
+            echo
+            echo "=== Host recompiler result ==="
+            echo "${{ steps.host.outcome }}"
+            echo
+            echo "=== Generated libraries ==="
+            find android/app/src/main/jniLibs/arm64-v8a \
+              -maxdepth 1 -type f -name "*.so" -print 2>/dev/null || true
+            echo
+            echo "=== Host recompiler output ==="
+            find ../rexglue-sdk-android/out/linux-amd64/Release \
+              -maxdepth 1 -type f -name "rexglue" -print 2>/dev/null || true
+          } > diagnostic-results/report.txt
 
-          if [ ! -e "$RB2_GAME" ]; then
-            echo "::error::O caminho de RB2_GAME não existe no runner."
-            echo "O arquivo ou diretório precisa estar acessível durante a compilação."
-            exit 1
-          fi
+          cat diagnostic-results/report.txt
 
-          bash tools/android/codegen.sh "$RB2_GAME"
-          bash tools/android/build_native.sh
-          bash tools/android/build_apk.sh
+          mkdir -p diagnostic-results/build-logs
 
-      - name: Locate generated APK
-        if: success()
-        run: |
-          set -eux
+          find android/native-build ../rexglue-sdk-android/out \
+            -type f \( \
+              -name "CMakeCache.txt" -o \
+              -name "build.ninja" -o \
+              -name "ninja_log" \
+            \) \
+            -exec cp --parents {} diagnostic-results/build-logs/ \; \
+            2>/dev/null || true
 
-          find . -type f -name "*.apk" -print
-
-          APK="android/app/build/outputs/apk/release/app-release.apk"
-
-          if [ ! -f "$APK" ]; then
-            echo "::error::O APK não foi encontrado no caminho esperado."
-            exit 1
-          fi
-
-      - name: Upload APK
-        if: success()
+      - name: Upload diagnostic results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: RB2-Android-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
+          name: RB2-Android-Diagnostics
+          path: |
+            diagnostic-results/
+            android/app/src/main/jniLibs/arm64-v8a/librb2probe.so
+            ../rexglue-sdk-android/out/linux-amd64/Release/rexglue
+          if-no-files-found: warn
           retention-days: 7
+
+      - name: Report final status
+        if: always()
+        run: |
+          echo "Vulkan probe: ${{ steps.probe.outcome }}"
+          echo "Host compiler test: ${{ steps.host.outcome }}"
+
+          if [ "${{ steps.probe.outcome }}" != "success" ] || \
+             [ "${{ steps.host.outcome }}" != "success" ]; then
+            echo "::warning::One or more diagnostic tests failed. Inspect the logs and artifact."
+          fi
