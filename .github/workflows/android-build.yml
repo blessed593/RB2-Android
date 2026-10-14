@@ -37,7 +37,22 @@ jobs:
             curl \
             build-essential \
             pkg-config \
-            spirv-cross
+            spirv-cross \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxfixes-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxcb1-dev \
+            libxcb-randr0-dev \
+            libxcb-xfixes0-dev \
+            libxcb-shape0-dev \
+            libxcb-xinput-dev
 
       - name: Configure Java
         run: |
@@ -68,8 +83,6 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
-          mkdir -p "$HOME"
-
           if [ ! -e "$HOME/android-sdk" ]; then
             ln -s "$ANDROID_HOME" "$HOME/android-sdk"
           fi
@@ -78,16 +91,13 @@ jobs:
           GLSLC="$NDK/shader-tools/linux-x86_64/glslc"
 
           if [ ! -x "$GLSLC" ]; then
-            echo "O glslc não foi encontrado no caminho esperado."
-            echo "Procurando o compilador no NDK..."
+            echo "::error::glslc não encontrado no caminho esperado."
             find "$NDK" -type f -name glslc -print || true
             exit 1
           fi
 
-          echo "Versão do compilador GLSL:"
           "$GLSLC" --version
-
-          echo "SDK e NDK configurados."
+          echo "Android SDK e NDK configurados."
 
       - name: Check project scripts
         run: |
@@ -99,7 +109,7 @@ jobs:
           test -f tools/android/build_native.sh
           test -f tools/android/build_apk.sh
 
-          echo "Todos os scripts necessários foram encontrados."
+          echo "Todos os scripts foram encontrados."
 
       - name: Prepare ReXGlue SDK
         run: |
@@ -119,13 +129,13 @@ jobs:
 
           if [ -z "$RB2_GAME" ]; then
             echo "::error::A variável RB2_GAME não foi configurada."
-            echo "Configure o caminho dos arquivos próprios do jogo nas variáveis do repositório."
+            echo "Configure o acesso aos arquivos próprios do jogo."
             exit 1
           fi
 
           if [ ! -e "$RB2_GAME" ]; then
-            echo "::error::O caminho configurado em RB2_GAME não existe no runner."
-            echo "A variável precisa apontar para arquivos acessíveis durante esta execução."
+            echo "::error::O caminho de RB2_GAME não existe no runner."
+            echo "O arquivo ou diretório precisa estar acessível durante a compilação."
             exit 1
           fi
 
@@ -138,9 +148,14 @@ jobs:
         run: |
           set -eux
 
-          find android -type f -name "*.apk" -print
+          find . -type f -name "*.apk" -print
 
-          test -f android/app/build/outputs/apk/release/app-release.apk
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "::error::O APK não foi encontrado no caminho esperado."
+            exit 1
+          fi
 
       - name: Upload APK
         if: success()
