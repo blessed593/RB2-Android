@@ -1,38 +1,71 @@
 diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
 --- a/src/input/sdl/sdl_input_driver.cpp
 +++ b/src/input/sdl/sdl_input_driver.cpp
-@@ -100,6 +100,31 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
+@@ -10,6 +10,7 @@
+ #include <array>
+ #include <filesystem>
++#include <string>
+ #include <rex/assert.h>
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+@@ -100,6 +101,52 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
+           }
+         }
        }
-       SDL_Gamepad_initialized_ = true;
- 
-+      // Diagnostic: enumerate Android input devices as seen by SDL.
++
++      // Add a fallback SDL gamepad mapping for the iPega PG-9021.
++      // Android reports this controller as a joystick/keyboard hybrid.
 +      int joystick_count = 0;
-+      SDL_JoystickID* joystick_ids =
-+          SDL_GetJoysticks(&joystick_count);
-+      REXLOG_INFO("SDL input diagnostic: {} joystick(s) detected.",
-+                  joystick_count);
++      SDL_JoystickID* joystick_ids = SDL_GetJoysticks(&joystick_count);
 +      if (joystick_ids) {
 +        for (int i = 0; i < joystick_count; ++i) {
-+          SDL_JoystickID joystick_id = joystick_ids[i];
++          const SDL_JoystickID joystick_id = joystick_ids[i];
 +          SDL_Joystick* joystick = SDL_OpenJoystick(joystick_id);
-+          if (joystick) {
-+            char guid_text[33] = {};
-+            SDL_GUIDToString(SDL_GetJoystickGUID(joystick),
-+                             guid_text,
-+                             static_cast<int>(sizeof(guid_text)));
-+            REXLOG_INFO(
-+                "SDL input diagnostic: joystick='{}', GUID={}, "
-+                "vendor=0x{:04X}, product=0x{:04X}, is_gamepad={}",
-+                SDL_GetJoystickName(joystick),
-+                guid_text,
-+                SDL_GetJoystickVendor(joystick),
-+                SDL_GetJoystickProduct(joystick),
-+                SDL_IsGamepad(joystick_id));
-+            SDL_CloseJoystick(joystick);
++          if (!joystick) {
++            continue;
 +          }
++
++          const Uint16 vendor = SDL_GetJoystickVendor(joystick);
++          const Uint16 product = SDL_GetJoystickProduct(joystick);
++          const bool is_ipega =
++              (vendor == 6473 && product == 1026);
++
++          if (is_ipega && !SDL_IsGamepad(joystick_id)) {
++            char guid_text[33] = {};
++            SDL_GUIDToString(
++                SDL_GetJoystickGUID(joystick), guid_text,
++                static_cast<int>(sizeof(guid_text)));
++
++            std::string mapping =
++                std::string(guid_text) +
++                ",iPega PG-9021,"
++                "a:b0,b:b1,x:b2,y:b3,"
++                "back:b4,start:b6,"
++                "leftstick:b7,rightstick:b8,"
++                "leftshoulder:b9,rightshoulder:b10,"
++                "dpup:h0.1,dpdown:h0.4,"
++                "dpleft:h0.8,dpright:h0.2,"
++                "leftx:a0,lefty:a1,"
++                "rightx:a2,righty:a3";
++
++            const int axes = SDL_GetNumJoystickAxes(joystick);
++            if (axes >= 6) {
++              mapping += ",lefttrigger:+a4,righttrigger:+a5";
++            }
++
++            if (SDL_AddGamepadMapping(mapping.c_str())) {
++              REXLOG_INFO(
++                  "iPega PG-9021: fallback gamepad mapping registered.");
++            } else {
++              REXLOG_WARN(
++                  "iPega PG-9021: could not register fallback mapping: {}",
++                  SDL_GetError());
++            }
++          }
++
++          SDL_CloseJoystick(joystick);
 +        }
 +        SDL_free(joystick_ids);
 +      }
 +
-       // Load custom controller mappings if available
-       if (!REXCVAR_GET(hid_mappings_file).empty()) {
+       REXLOG_INFO("SDL input driver initialized successfully");
