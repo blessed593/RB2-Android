@@ -11,10 +11,11 @@ if [ ! -f "$SDK/.android-patches/.applied" ]; then
   exit 1
 fi
 
-# Require the intended compiler instead of silently using /usr/bin/clang++.
+# Use the intended compiler unless the workflow explicitly overrides it.
 CC="${CC:-clang-20}"
 CXX="${CXX:-clang++-20}"
 
+echo "=== Checking host compilers ==="
 command -v "$CC"
 command -v "$CXX"
 
@@ -23,18 +24,42 @@ command -v "$CXX"
 
 cd "$SDK"
 
-# Configure the preset with explicit compiler selections.
-# CMake uses these on the first configuration of the build directory.
-cmake --preset linux-amd64 \
-  -DCMAKE_C_COMPILER="$CC" \
-  -DCMAKE_CXX_COMPILER="$CXX"
+# Remove the previous host build directory so CMake cannot reuse
+# a compiler selected during an earlier configuration.
+echo "=== Cleaning previous host build configuration ==="
+rm -rf out/build/linux-amd64
+rm -rf out/linux-amd64
 
-# Confirm which compiler CMake actually selected.
-grep -E 'CMAKE_(C|CXX)_COMPILER:FILEPATH=' \
+# Configure the Linux x86_64 preset with explicit compiler paths.
+echo "=== Configuring CMake with the requested compilers ==="
+cmake --preset linux-amd64 \
+  -DCMAKE_C_COMPILER="$(command -v "$CC")" \
+  -DCMAKE_CXX_COMPILER="$(command -v "$CXX")"
+
+# Display the compiler selection recorded by CMake.
+echo "=== CMake compiler configuration ==="
+grep -E '^CMAKE_(C|CXX)_COMPILER(:FILEPATH|:STRING)?=' \
   out/build/linux-amd64/CMakeCache.txt || true
 
+# Ensure the configuration did not silently select the old compiler.
+if ! grep -Fq "$(command -v "$CXX")" \
+  out/build/linux-amd64/CMakeCache.txt; then
+  echo "::error::CMake did not record the expected C++ compiler: $CXX"
+  exit 1
+fi
+
+# Compile the host-side recompiler.
+echo "=== Building rexglue ==="
 cmake --build --preset linux-amd64-release --target rexglue
 
-test -x "$SDK/out/linux-amd64/Release/rexglue"
+# Confirm the expected executable exists.
+REXGLUE="$SDK/out/linux-amd64/Release/rexglue"
 
-echo "[ok] $SDK/out/linux-amd64/Release/rexglue"
+if [ ! -x "$REXGLUE" ]; then
+  echo "::error::The rexglue executable was not created at $REXGLUE"
+  exit 1
+fi
+
+echo "=== Host tool build completed successfully ==="
+ls -lh "$REXGLUE"
+echo "[ok] $REXGLUE"
