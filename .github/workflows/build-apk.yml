@@ -67,12 +67,20 @@ jobs:
             ca-certificates \
             libvulkan-dev \
             libx11-xcb-dev \
+            libwayland-dev \
+            libwayland-egl-backend-dev \
+            libxkbcommon-dev \
+            wayland-protocols \
             spirv-cross
 
           command -v spirv-cross
           spirv-cross --help >/dev/null
 
           pkg-config --modversion x11-xcb
+          pkg-config --modversion wayland-client
+          pkg-config --modversion wayland-egl
+          pkg-config --modversion wayland-cursor
+          pkg-config --modversion xkbcommon
 
       - name: Install Clang 20
         shell: bash
@@ -108,7 +116,6 @@ jobs:
             google-api-python-client \
             google-auth
 
-      # Restore the previously saved ISO, if available.
       - name: Restore Xbox 360 ISO cache
         id: iso-cache
         uses: actions/cache/restore@v4
@@ -116,7 +123,6 @@ jobs:
           path: ${{ runner.temp }}/rb2.iso
           key: rb2-iso-v1
 
-      # Download the ISO only when the cache does not contain it.
       - name: Download private ISO from Google Drive
         if: steps.iso-cache.outputs.cache-hit != 'true'
         env:
@@ -209,7 +215,6 @@ jobs:
 
           df -h /
 
-      # Save the ISO for future workflow runs.
       - name: Save Xbox 360 ISO cache
         if: steps.iso-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -292,8 +297,6 @@ jobs:
 
           echo "ISO validada com sucesso."
 
-          # The ISO stays in the cache for future builds.
-          # Remove only the working copy after extraction.
           rm -f "$RUNNER_TEMP/rb2.iso"
 
           df -h /
