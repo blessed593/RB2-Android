@@ -16,62 +16,131 @@ jobs:
       - name: Download repository
         uses: actions/checkout@v4
         with:
+          ref: android
           submodules: recursive
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git python3 python3-pip \
-            clang cmake ninja-build \
+            git \
+            python3 \
+            python3-pip \
+            python3-venv \
+            clang \
+            cmake \
+            ninja-build \
             openjdk-17-jdk \
-            unzip zip wget curl \
-            build-essential pkg-config \
+            unzip \
+            zip \
+            wget \
+            curl \
+            build-essential \
+            pkg-config \
             spirv-cross
 
       - name: Configure Java
         run: |
           echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
+          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+          java -version
 
       - name: Configure Android SDK
         uses: android-actions/setup-android@v4
 
       - name: Install Android build tools
         run: |
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
-          sdkmanager "ndk;28.2.13676358"
-          sdkmanager "cmake;3.31.6"
-          sdkmanager "platform-tools"
+          set -eux
+
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.31.6"
+
+          yes | sdkmanager --licenses || true
+
+      - name: Configure Android SDK path
+        run: |
+          set -eux
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          mkdir -p "$HOME"
+
+          if [ ! -e "$HOME/android-sdk" ]; then
+            ln -s "$ANDROID_HOME" "$HOME/android-sdk"
+          fi
+
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          GLSLC="$NDK/shader-tools/linux-x86_64/glslc"
+
+          if [ ! -x "$GLSLC" ]; then
+            echo "O glslc não foi encontrado no caminho esperado."
+            echo "Procurando o compilador no NDK..."
+            find "$NDK" -type f -name glslc -print || true
+            exit 1
+          fi
+
+          echo "Versão do compilador GLSL:"
+          "$GLSLC" --version
+
+          echo "SDK e NDK configurados."
 
       - name: Check project scripts
         run: |
           set -eux
+
           test -f tools/android/prepare_sdk.sh
           test -f tools/android/build_host_cli.sh
           test -f tools/android/codegen.sh
           test -f tools/android/build_native.sh
           test -f tools/android/build_apk.sh
 
+          echo "Todos os scripts necessários foram encontrados."
+
       - name: Prepare ReXGlue SDK
-        run: bash tools/android/prepare_sdk.sh
+        run: |
+          set -eux
+          bash tools/android/prepare_sdk.sh
 
       - name: Build host recompiler
-        run: bash tools/android/build_host_cli.sh
+        run: |
+          set -eux
+          bash tools/android/build_host_cli.sh
 
       - name: Build APK
         env:
           RB2_GAME: ${{ vars.RB2_GAME }}
         run: |
+          set -eux
+
           if [ -z "$RB2_GAME" ]; then
-            echo "RB2_GAME não foi configurado."
-            echo "A compilação precisa dos dados próprios do jogo."
+            echo "::error::A variável RB2_GAME não foi configurada."
+            echo "Configure o caminho dos arquivos próprios do jogo nas variáveis do repositório."
+            exit 1
+          fi
+
+          if [ ! -e "$RB2_GAME" ]; then
+            echo "::error::O caminho configurado em RB2_GAME não existe no runner."
+            echo "A variável precisa apontar para arquivos acessíveis durante esta execução."
             exit 1
           fi
 
           bash tools/android/codegen.sh "$RB2_GAME"
           bash tools/android/build_native.sh
           bash tools/android/build_apk.sh
+
+      - name: Locate generated APK
+        if: success()
+        run: |
+          set -eux
+
+          find android -type f -name "*.apk" -print
+
+          test -f android/app/build/outputs/apk/release/app-release.apk
 
       - name: Upload APK
         if: success()
