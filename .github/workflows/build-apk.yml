@@ -66,10 +66,13 @@ jobs:
             python3-venv \
             ca-certificates \
             libvulkan-dev \
+            libx11-xcb-dev \
             spirv-cross
 
           command -v spirv-cross
           spirv-cross --help >/dev/null
+
+          pkg-config --modversion x11-xcb
 
       - name: Install Clang 20
         shell: bash
