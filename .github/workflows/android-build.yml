@@ -34,9 +34,7 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh 20
 
-          sudo apt-get install -y \
-            clang-20 \
-            lld-20
+          sudo apt-get install -y clang-20 lld-20
 
           clang-20 --version
           clang++-20 --version
@@ -228,7 +226,10 @@ jobs:
       - name: Collect diagnostic information
         if: always()
         run: |
-          mkdir -p diagnostic-results
+          set -u
+
+          mkdir -p diagnostic-results/build-logs
+          mkdir -p diagnostic-results/files
 
           {
             echo "RB2 Android build diagnostics"
@@ -259,26 +260,45 @@ jobs:
 
           cat diagnostic-results/report.txt
 
-          mkdir -p diagnostic-results/build-logs
+          if [ -f android/app/src/main/jniLibs/arm64-v8a/librb2probe.so ]; then
+            cp android/app/src/main/jniLibs/arm64-v8a/librb2probe.so \
+              diagnostic-results/files/
+          fi
 
-          find android/native-build ../rexglue-sdk-android/out \
-            -type f \( \
-              -name "CMakeCache.txt" -o \
-              -name "build.ninja" -o \
-              -name "ninja_log" \
-            \) \
-            -exec cp --parents {} diagnostic-results/build-logs/ \; \
-            2>/dev/null || true
+          CLI="../rexglue-sdk-android/out/linux-amd64/Release/rexglue"
+
+          if [ -f "$CLI" ]; then
+            cp "$CLI" diagnostic-results/files/
+          fi
+
+          if [ -d android/native-build ]; then
+            find android/native-build \
+              -type f \( \
+                -name "CMakeCache.txt" -o \
+                -name "build.ninja" -o \
+                -name "ninja_log" \
+              \) \
+              -exec cp --parents {} diagnostic-results/build-logs/ \; \
+              2>/dev/null || true
+          fi
+
+          if [ -d ../rexglue-sdk-android/out ]; then
+            find ../rexglue-sdk-android/out \
+              -type f \( \
+                -name "CMakeCache.txt" -o \
+                -name "build.ninja" -o \
+                -name "ninja_log" \
+              \) \
+              -exec cp --parents {} diagnostic-results/build-logs/ \; \
+              2>/dev/null || true
+          fi
 
       - name: Upload diagnostic results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: RB2-Android-Diagnostics
-          path: |
-            diagnostic-results/
-            android/app/src/main/jniLibs/arm64-v8a/librb2probe.so
-            ../rexglue-sdk-android/out/linux-amd64/Release/rexglue
+          path: diagnostic-results/
           if-no-files-found: warn
           retention-days: 7
 
