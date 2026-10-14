@@ -1,0 +1,38 @@
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -100,6 +100,24 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
+       }
+       SDL_Gamepad_initialized_ = true;
+ 
++      // Diagnostic: enumerate Android input devices as seen by SDL.
++      int joystick_count = 0;
++      SDL_JoystickID* joystick_ids =
++          SDL_GetJoysticks(&joystick_count);
++      REXLOG_INFO("SDL input diagnostic: {} joystick(s) detected.",
++                  joystick_count);
++      if (joystick_ids) {
++        for (int i = 0; i < joystick_count; ++i) {
++          SDL_JoystickID joystick_id = joystick_ids[i];
++          SDL_Joystick* joystick = SDL_OpenJoystick(joystick_id);
++          if (joystick) {
++            char guid_text[33] = {};
++            SDL_GUIDToString(SDL_GetJoystickGUID(joystick),
++                             guid_text,
++                             static_cast<int>(sizeof(guid_text)));
++            REXLOG_INFO(
++                "SDL input diagnostic: joystick='{}', GUID={}, "
++                "vendor=0x{:04X}, product=0x{:04X}, is_gamepad={}",
++                SDL_GetJoystickName(joystick),
++                guid_text,
++                SDL_GetJoystickVendor(joystick),
++                SDL_GetJoystickProduct(joystick),
++                SDL_IsGamepad(joystick_id));
++            SDL_CloseJoystick(joystick);
++          }
++        }
++        SDL_free(joystick_ids);
++      }
++
+       // Load custom controller mappings if available
+       if (!REXCVAR_GET(hid_mappings_file).empty()) {
