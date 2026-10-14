@@ -13,8 +13,8 @@ diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver
          }
        }
 +
-+      // Add a fallback SDL gamepad mapping for the iPega PG-9021.
-+      // Android reports this controller as a joystick/keyboard hybrid.
++      // Register an SDL gamepad mapping for the iPega PG-9021.
++      // Android identifies this controller as vendor 6473, product 1026.
 +      int joystick_count = 0;
 +      SDL_JoystickID* joystick_ids = SDL_GetJoysticks(&joystick_count);
 +      if (joystick_ids) {
@@ -27,10 +27,9 @@ diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver
 +
 +          const Uint16 vendor = SDL_GetJoystickVendor(joystick);
 +          const Uint16 product = SDL_GetJoystickProduct(joystick);
-+          const bool is_ipega =
-+              (vendor == 6473 && product == 1026);
 +
-+          if (is_ipega && !SDL_IsGamepad(joystick_id)) {
++          if (vendor == 6473 && product == 1026 &&
++              !SDL_IsGamepad(joystick_id)) {
 +            char guid_text[33] = {};
 +            SDL_GUIDToString(
 +                SDL_GetJoystickGUID(joystick), guid_text,
@@ -53,14 +52,7 @@ diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver
 +              mapping += ",lefttrigger:+a4,righttrigger:+a5";
 +            }
 +
-+            if (SDL_AddGamepadMapping(mapping.c_str())) {
-+              REXLOG_INFO(
-+                  "iPega PG-9021: fallback gamepad mapping registered.");
-+            } else {
-+              REXLOG_WARN(
-+                  "iPega PG-9021: could not register fallback mapping: {}",
-+                  SDL_GetError());
-+            }
++            SDL_AddGamepadMapping(mapping.c_str());
 +          }
 +
 +          SDL_CloseJoystick(joystick);
