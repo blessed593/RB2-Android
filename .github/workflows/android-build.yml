@@ -19,15 +19,38 @@ jobs:
           ref: android
           submodules: recursive
 
+      - name: Install Clang 20
+        run: |
+          set -eux
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget \
+            ca-certificates \
+            gnupg \
+            lsb-release
+
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+
+          sudo apt-get install -y \
+            clang-20 \
+            lld-20
+
+          clang-20 --version
+          clang++-20 --version
+
       - name: Install dependencies
         run: |
+          set -eux
+
           sudo apt-get update
           sudo apt-get install -y \
             git \
             python3 \
             python3-pip \
             python3-venv \
-            clang \
             cmake \
             ninja-build \
             openjdk-17-jdk \
@@ -38,6 +61,7 @@ jobs:
             build-essential \
             pkg-config \
             spirv-cross \
+            libgtk-3-dev \
             libasound2-dev \
             libx11-dev \
             libx11-xcb-dev \
@@ -63,8 +87,11 @@ jobs:
 
       - name: Configure Java
         run: |
+          set -eux
+
           echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> "$GITHUB_ENV"
           echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> "$GITHUB_PATH"
+
           java -version
 
       - name: Configure Android SDK
@@ -73,17 +100,20 @@ jobs:
       - name: Install Android build tools
         run: |
           set -eux
+
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
             "ndk;28.2.13676358" \
             "cmake;3.31.6"
+
           yes | sdkmanager --licenses || true
 
       - name: Configure Android SDK path
         run: |
           set -eux
+
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
@@ -101,26 +131,68 @@ jobs:
           fi
 
           "$GLSLC" --version
+
           echo "Android SDK e NDK configurados."
 
       - name: Check project scripts
         run: |
           set -eux
+
           test -f tools/android/prepare_sdk.sh
           test -f tools/android/build_host_cli.sh
           test -f tools/android/codegen.sh
           test -f tools/android/build_native.sh
           test -f tools/android/build_apk.sh
+
           echo "Todos os scripts foram encontrados."
 
       - name: Prepare ReXGlue SDK
         run: |
           set -eux
+
           bash tools/android/prepare_sdk.sh
+
+      - name: Configure ReXGlue compiler
+        run: |
+          set -eux
+
+          SCRIPT="tools/android/build_host_cli.sh"
+
+          python3 - "$SCRIPT" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          content = path.read_text()
+
+          old = "cmake --preset linux-amd64"
+          new = (
+              "cmake --preset linux-amd64 "
+              "-DCMAKE_C_COMPILER=clang-20 "
+              "-DCMAKE_CXX_COMPILER=clang++-20"
+          )
+
+          if new in content:
+              print("O script já está configurado para Clang 20.")
+          elif content.count(old) == 1:
+              path.write_text(content.replace(old, new, 1))
+              print("Script configurado para usar Clang 20.")
+          else:
+              raise SystemExit(
+                  "Não foi possível identificar com segurança "
+                  "o comando CMake esperado no script."
+              )
+          PY
+
+          grep -n "cmake --preset linux-amd64" "$SCRIPT"
 
       - name: Build host recompiler
         run: |
           set -eux
+
+          clang-20 --version
+          clang++-20 --version
+
           bash tools/android/build_host_cli.sh
 
       - name: Build APK
@@ -149,6 +221,7 @@ jobs:
         if: success()
         run: |
           set -eux
+
           find . -type f -name "*.apk" -print
 
           APK="android/app/build/outputs/apk/release/app-release.apk"
