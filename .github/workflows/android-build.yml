@@ -38,6 +38,7 @@ jobs:
             build-essential \
             pkg-config \
             spirv-cross \
+            libasound2-dev \
             libx11-dev \
             libx11-xcb-dev \
             libxext-dev \
@@ -46,6 +47,7 @@ jobs:
             libxcursor-dev \
             libxi-dev \
             libxinerama-dev \
+            libxss-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
             libxcb1-dev \
