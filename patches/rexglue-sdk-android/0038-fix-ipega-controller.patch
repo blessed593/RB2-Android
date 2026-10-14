@@ -5,14 +5,13 @@ diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver
  #include <array>
  #include <filesystem>
 +#include <string>
+ 
  #include <rex/assert.h>
  #include <rex/chrono/clock.h>
  #include <rex/cvar.h>
-@@ -100,6 +101,52 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
-           }
-         }
-       }
-+
+@@ -75,4 +76,50 @@ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
+       SDL_Gamepad_initialized_ = true;
+ 
 +      // Register an SDL gamepad mapping for the iPega PG-9021.
 +      // Android identifies this controller as vendor 6473, product 1026.
 +      int joystick_count = 0;
@@ -60,4 +59,4 @@ diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver
 +        SDL_free(joystick_ids);
 +      }
 +
-       REXLOG_INFO("SDL input driver initialized successfully");
+       // Load custom controller mappings if available
