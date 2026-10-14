@@ -32,6 +32,7 @@ jobs:
         shell: bash
         run: |
           set -eux
+
           sudo rm -rf \
             /usr/share/dotnet \
             /usr/local/share/boost \
@@ -40,13 +41,16 @@ jobs:
             /usr/local/share/powershell \
             /opt/hostedtoolcache/CodeQL \
             /usr/local/lib/android/sdk/system-images
+
           df -h /
 
       - name: Install build dependencies
         shell: bash
         run: |
           set -eux
+
           sudo apt-get update
+
           sudo apt-get install -y \
             build-essential \
             cmake \
@@ -61,15 +65,21 @@ jobs:
             python3-pip \
             python3-venv \
             ca-certificates \
-            libvulkan-dev
+            libvulkan-dev \
+            spirv-cross
+
+          command -v spirv-cross
+          spirv-cross --help >/dev/null
 
       - name: Install Clang 20
         shell: bash
         run: |
           set -eux
+
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 20
+
           clang-20 --version
           clang++-20 --version
 
@@ -88,12 +98,24 @@ jobs:
         shell: bash
         run: |
           set -eux
+
           python3 -m venv "$RUNNER_TEMP/drive-venv"
+
           "$RUNNER_TEMP/drive-venv/bin/pip" install \
             google-api-python-client \
             google-auth
 
+      # Restore the previously saved ISO, if available.
+      - name: Restore Xbox 360 ISO cache
+        id: iso-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/rb2.iso
+          key: rb2-iso-v1
+
+      # Download the ISO only when the cache does not contain it.
       - name: Download private ISO from Google Drive
+        if: steps.iso-cache.outputs.cache-hit != 'true'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GOOGLE_DRIVE_FILE_ID: ${{ secrets.GOOGLE_DRIVE_FILE_ID }}
@@ -112,7 +134,6 @@ jobs:
           }
 
           "$RUNNER_TEMP/drive-venv/bin/python" <<'PY'
-          import io
           import json
           import os
           import pathlib
@@ -147,6 +168,7 @@ jobs:
           print("Tamanho informado:", metadata.get("size", "desconhecido"))
 
           output = pathlib.Path(os.environ["RUNNER_TEMP"]) / "rb2.iso"
+
           request = drive.files().get_media(
               fileId=file_id,
               supportsAllDrives=True,
@@ -158,20 +180,60 @@ jobs:
                   request,
                   chunksize=16 * 1024 * 1024,
               )
+
               done = False
 
               while not done:
                   status, done = downloader.next_chunk()
-                  if status:
-                      print(f"Download: {status.progress() * 100:.1f}%")
 
-          if output.stat().st_size == 0:
-              print("Erro: o arquivo baixado está vazio.", file=sys.stderr)
+                  if status:
+                      print(
+                          f"Download: {status.progress() * 100:.1f}%",
+                          flush=True,
+                      )
+
+          actual_size = output.stat().st_size
+
+          if actual_size != 7838695424:
+              print(
+                  f"Erro: tamanho inesperado da ISO: {actual_size} bytes",
+                  file=sys.stderr,
+              )
               sys.exit(1)
 
-          print(f"Download concluído: {output.stat().st_size} bytes")
+          print(f"Download concluído: {actual_size} bytes")
           PY
 
+          df -h /
+
+      # Save the ISO for future workflow runs.
+      - name: Save Xbox 360 ISO cache
+        if: steps.iso-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/rb2.iso
+          key: rb2-iso-v1
+
+      - name: Verify cached or downloaded ISO
+        shell: bash
+        run: |
+          set -eux
+
+          ISO="$RUNNER_TEMP/rb2.iso"
+
+          if [ ! -s "$ISO" ]; then
+            echo "::error::ISO ausente ou vazia após download/restauração do cache."
+            exit 1
+          fi
+
+          ACTUAL_SIZE="$(stat -c '%s' "$ISO")"
+
+          if [ "$ACTUAL_SIZE" != "7838695424" ]; then
+            echo "::error::Tamanho inesperado da ISO: $ACTUAL_SIZE bytes."
+            exit 1
+          fi
+
+          echo "ISO disponível: $ACTUAL_SIZE bytes"
           df -h /
 
       - name: Prepare SDK
@@ -187,7 +249,9 @@ jobs:
           CXX: clang++-20
         run: |
           set -eux
+
           bash tools/android/build_host_cli.sh
+
           test -x "$THPS_SDK/out/linux-amd64/Release/rexglue"
 
       - name: Extract Xbox 360 ISO
@@ -223,13 +287,19 @@ jobs:
             exit 1
           fi
 
+          echo "ISO validada com sucesso."
+
+          # The ISO stays in the cache for future builds.
+          # Remove only the working copy after extraction.
           rm -f "$RUNNER_TEMP/rb2.iso"
+
           df -h /
 
       - name: Generate game C++ code
         shell: bash
         run: |
           set -eux
+
           bash tools/android/codegen.sh "$RUNNER_TEMP/rb2-game"
 
       - name: Build Android native libraries
@@ -245,6 +315,7 @@ jobs:
         shell: bash
         run: |
           set -eux
+
           bash tools/android/build_apk.sh
 
           test -s android/app/build/outputs/apk/release/app-release.apk
