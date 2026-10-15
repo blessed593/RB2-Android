@@ -22,6 +22,9 @@ jobs:
       THPS_SDK: ${{ github.workspace }}/../rexglue-sdk-android
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
 
+      JOBS: 4
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,6 +35,7 @@ jobs:
         shell: bash
         run: |
           set -eux
+
           sudo rm -rf \
             /usr/share/dotnet \
             /usr/local/share/boost \
@@ -40,13 +44,17 @@ jobs:
             /usr/local/share/powershell \
             /opt/hostedtoolcache/CodeQL \
             /usr/local/lib/android/sdk/system-images
+
           df -h /
+
       - name: Install build dependencies
         shell: bash
         run: |
           set -eux
+
           sudo apt-get update
-          sudo apt-get install -y \
+
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
             ninja-build \
@@ -67,27 +75,39 @@ jobs:
             libxkbcommon-dev \
             wayland-protocols \
             spirv-cross
+
           command -v spirv-cross
           spirv-cross --help >/dev/null
+
           pkg-config --modversion x11-xcb
           pkg-config --modversion wayland-client
           pkg-config --modversion wayland-egl
           pkg-config --modversion wayland-cursor
           pkg-config --modversion xkbcommon
+
       - name: Install Clang 20
         shell: bash
         run: |
           set -eux
+
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
           chmod +x /tmp/llvm.sh
+
           sudo /tmp/llvm.sh 20
+
           clang-20 --version
           clang++-20 --version
+
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle.properties
+            android/**/gradle-wrapper.properties
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -98,10 +118,13 @@ jobs:
         shell: bash
         run: |
           set -eux
+
           python3 -m venv "$RUNNER_TEMP/drive-venv"
+
           "$RUNNER_TEMP/drive-venv/bin/pip" install \
             google-api-python-client \
             google-auth
+
       - name: Restore Xbox 360 ISO cache
         id: iso-cache
         uses: actions/cache/restore@v4
@@ -117,70 +140,90 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || {
             echo "::error::Missing GOOGLE_SERVICE_ACCOUNT_JSON secret"
             exit 1
           }
+
           test -n "$GOOGLE_DRIVE_FILE_ID" || {
             echo "::error::Missing GOOGLE_DRIVE_FILE_ID secret"
             exit 1
           }
+
           "$RUNNER_TEMP/drive-venv/bin/python" <<'PY'
           import json
           import os
           import pathlib
           import sys
+
           from google.oauth2 import service_account
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaIoBaseDownload
+
           credentials_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
           file_id = os.environ["GOOGLE_DRIVE_FILE_ID"]
+
           credentials = service_account.Credentials.from_service_account_info(
               json.loads(credentials_json),
               scopes=["https://www.googleapis.com/auth/drive.readonly"],
           )
+
           drive = build(
               "drive",
               "v3",
               credentials=credentials,
               cache_discovery=False,
           )
+
           metadata = drive.files().get(
               fileId=file_id,
               fields="id,name,size,mimeType",
               supportsAllDrives=True,
           ).execute()
+
           print("Arquivo encontrado:", metadata.get("name", "sem nome"))
           print("Tamanho informado:", metadata.get("size", "desconhecido"))
+
           output = pathlib.Path(os.environ["RUNNER_TEMP"]) / "rb2.iso"
+
           request = drive.files().get_media(
               fileId=file_id,
               supportsAllDrives=True,
           )
+
           with output.open("wb") as file:
               downloader = MediaIoBaseDownload(
                   file,
                   request,
                   chunksize=16 * 1024 * 1024,
               )
+
               done = False
+
               while not done:
                   status, done = downloader.next_chunk()
+
                   if status:
                       print(
                           f"Download: {status.progress() * 100:.1f}%",
                           flush=True,
                       )
+
           actual_size = output.stat().st_size
+
           if actual_size != 7838695424:
               print(
                   f"Erro: tamanho inesperado da ISO: {actual_size} bytes",
                   file=sys.stderr,
               )
               sys.exit(1)
+
           print(f"Download concluído: {actual_size} bytes")
           PY
+
           df -h /
+
       - name: Save Xbox 360 ISO cache
         if: steps.iso-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -192,23 +235,46 @@ jobs:
         shell: bash
         run: |
           set -eux
+
           ISO="$RUNNER_TEMP/rb2.iso"
+
           if [ ! -s "$ISO" ]; then
             echo "::error::ISO ausente ou vazia após download/restauração do cache."
             exit 1
           fi
+
           ACTUAL_SIZE="$(stat -c '%s' "$ISO")"
+
           if [ "$ACTUAL_SIZE" != "7838695424" ]; then
             echo "::error::Tamanho inesperado da ISO: $ACTUAL_SIZE bytes."
             exit 1
           fi
+
           echo "ISO disponível: $ACTUAL_SIZE bytes"
+
           df -h /
+
+      - name: Restore ReXGlue SDK cache
+        id: sdk-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/../rexglue-sdk-android
+          key: rexglue-sdk-v1-${{ hashFiles('patches/rexglue-sdk-android/*.patch', 'tools/android/prepare_sdk.sh', 'tools/android/resolve_shaders/**') }}
+
       - name: Prepare SDK
         shell: bash
         run: |
           set -eux
+
           bash tools/android/prepare_sdk.sh
+
+      - name: Save ReXGlue SDK cache
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/../rexglue-sdk-android
+          key: rexglue-sdk-v1-${{ hashFiles('patches/rexglue-sdk-android/*.patch', 'tools/android/prepare_sdk.sh', 'tools/android/resolve_shaders/**') }}
+
       - name: Build host code-generation tool
         shell: bash
         env:
@@ -216,40 +282,58 @@ jobs:
           CXX: clang++-20
         run: |
           set -eux
+
           bash tools/android/build_host_cli.sh
+
           test -x "$THPS_SDK/out/linux-amd64/Release/rexglue"
+
       - name: Extract Xbox 360 ISO
         shell: bash
         run: |
           set -eux
+
           GAME_DIR="$RUNNER_TEMP/rb2-game"
+
           mkdir -p "$GAME_DIR"
+
           python3 tools/android/xdvdfs.py \
             "$RUNNER_TEMP/rb2.iso" \
             "$GAME_DIR"
+
           test -s "$GAME_DIR/default.xex"
+
           echo "Arquivos extraídos:"
           find "$GAME_DIR" -maxdepth 2 -type f | head -80
+
           echo "Tamanho do executável:"
           stat -c '%s bytes' "$GAME_DIR/default.xex"
+
           ACTUAL_SIZE="$(stat -c '%s' "$GAME_DIR/default.xex")"
           ACTUAL_SHA1="$(sha1sum "$GAME_DIR/default.xex" | cut -d ' ' -f 1)"
+
           if [ "$ACTUAL_SIZE" != "7151616" ]; then
             echo "::error::O default.xex não corresponde ao tamanho esperado da versão USA Rev 1."
             exit 1
           fi
+
           if [ "$ACTUAL_SHA1" != "f57b501fa2cdd309c2c56b76a5f297acbc564fd2" ]; then
             echo "::error::O SHA-1 do default.xex não corresponde à versão esperada."
             exit 1
           fi
+
           echo "ISO validada com sucesso."
+
           rm -f "$RUNNER_TEMP/rb2.iso"
+
           df -h /
+
       - name: Generate game C++ code
         shell: bash
         run: |
           set -eux
+
           bash tools/android/codegen.sh "$RUNNER_TEMP/rb2-game"
+
       - name: Build Android native libraries
         shell: bash
         env:
@@ -257,15 +341,21 @@ jobs:
           CXX: clang++-20
         run: |
           set -eux
+
           bash tools/android/build_native.sh
+
       - name: Build release APK
         shell: bash
         run: |
           set -eux
+
           bash tools/android/build_apk.sh
+
           test -s android/app/build/outputs/apk/release/app-release.apk
+
           echo "APK criado:"
           ls -lh android/app/build/outputs/apk/release/app-release.apk
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
