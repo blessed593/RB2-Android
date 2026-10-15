@@ -25,18 +25,10 @@ jobs:
       CMAKE_BUILD_PARALLEL_LEVEL: 4
 
     steps:
-      # -------------------------------------------------------
-      # Checkout
-      # -------------------------------------------------------
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: android
-
-      # -------------------------------------------------------
-      # Free disk space
-      # -------------------------------------------------------
 
       - name: Free disk space
         shell: bash
@@ -53,10 +45,6 @@ jobs:
             /usr/local/lib/android/sdk/system-images
 
           df -h /
-
-      # -------------------------------------------------------
-      # Dependencies
-      # -------------------------------------------------------
 
       - name: Install build dependencies
         shell: bash
@@ -108,10 +96,6 @@ jobs:
           clang-20 --version
           clang++-20 --version
 
-      # -------------------------------------------------------
-      # Java and Android SDK
-      # -------------------------------------------------------
-
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -141,10 +125,6 @@ jobs:
           "$ANDROID_HOME/cmake/3.31.6/bin/cmake" --version
           "$ANDROID_HOME/ndk/28.2.13676358/ndk-build" --version || true
 
-      # -------------------------------------------------------
-      # Google Drive API
-      # -------------------------------------------------------
-
       - name: Install Google Drive API libraries
         shell: bash
         run: |
@@ -156,9 +136,7 @@ jobs:
             google-api-python-client \
             google-auth
 
-      # -------------------------------------------------------
       # Xbox 360 ISO cache
-      # -------------------------------------------------------
 
       - name: Restore Xbox 360 ISO cache
         id: iso-cache
@@ -288,9 +266,7 @@ jobs:
           path: ${{ runner.temp }}/rb2.iso
           key: rb2-iso-v1
 
-      # -------------------------------------------------------
       # ReXGlue SDK cache
-      # -------------------------------------------------------
 
       - name: Restore ReXGlue SDK cache
         id: sdk-cache
@@ -321,9 +297,7 @@ jobs:
           path: .cache/rexglue-sdk-android
           key: rexglue-sdk-v1-${{ hashFiles('tools/android/prepare_sdk.sh', 'patches/rexglue-sdk-android/*.patch', 'tools/android/resolve_shaders/**') }}
 
-      # -------------------------------------------------------
       # Host code generation
-      # -------------------------------------------------------
 
       - name: Build host code-generation tool
         shell: bash
@@ -337,9 +311,7 @@ jobs:
 
           test -x "$THPS_SDK/out/linux-amd64/Release/rexglue"
 
-      # -------------------------------------------------------
       # Extract and validate game
-      # -------------------------------------------------------
 
       - name: Extract Xbox 360 ISO
         shell: bash
@@ -379,9 +351,7 @@ jobs:
           rm -f "$RUNNER_TEMP/rb2.iso"
           df -h /
 
-      # -------------------------------------------------------
       # Generate game C++ code
-      # -------------------------------------------------------
 
       - name: Generate game C++ code
         shell: bash
@@ -390,9 +360,7 @@ jobs:
 
           bash tools/android/codegen.sh "$RUNNER_TEMP/rb2-game" "$THPS_SDK"
 
-      # -------------------------------------------------------
       # Build Android native libraries
-      # -------------------------------------------------------
 
       - name: Build Android native libraries
         shell: bash
@@ -404,9 +372,7 @@ jobs:
 
           bash tools/android/build_native.sh
 
-      # -------------------------------------------------------
       # Build APK
-      # -------------------------------------------------------
 
       - name: Build release APK
         shell: bash
@@ -422,9 +388,7 @@ jobs:
           echo "APK criado:"
           ls -lh "$APK"
 
-      # -------------------------------------------------------
       # Upload APK artifact
-      # -------------------------------------------------------
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
