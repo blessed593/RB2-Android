@@ -90,7 +90,7 @@ public class LauncherActivity extends Activity {
         int bgRes = getResources().getIdentifier("launcher_bg", "drawable", getPackageName());
         android.graphics.Bitmap ownBitmap = ownArt.isFile()
                 ? android.graphics.BitmapFactory.decodeFile(ownArt.getPath()) : null;
-        int bg = ownBitmap != null ? 1 : bgRes;
+        int bg = gameInstalled() ? (ownBitmap != null ? 1 : bgRes) : 0;
         if (bg != 0) {
             ImageView art = new ImageView(this);
             if (ownBitmap != null) art.setImageBitmap(ownBitmap); else art.setImageResource(bgRes);
