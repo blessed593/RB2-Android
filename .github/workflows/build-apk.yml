@@ -25,10 +25,18 @@ jobs:
       CMAKE_BUILD_PARALLEL_LEVEL: 4
 
     steps:
+      # -------------------------------------------------------
+      # Checkout
+      # -------------------------------------------------------
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: android
+
+      # -------------------------------------------------------
+      # Free disk space
+      # -------------------------------------------------------
 
       - name: Free disk space
         shell: bash
@@ -45,6 +53,10 @@ jobs:
             /usr/local/lib/android/sdk/system-images
 
           df -h /
+
+      # -------------------------------------------------------
+      # Dependencies
+      # -------------------------------------------------------
 
       - name: Install build dependencies
         shell: bash
@@ -96,6 +108,10 @@ jobs:
           clang-20 --version
           clang++-20 --version
 
+      # -------------------------------------------------------
+      # Java and Android SDK
+      # -------------------------------------------------------
+
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
@@ -111,6 +127,23 @@ jobs:
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;28.2.13676358 cmake;3.31.6'
+
+      - name: Verify Android toolchain
+        shell: bash
+        run: |
+          set -eux
+
+          test -d "$ANDROID_HOME"
+          test -d "$ANDROID_HOME/ndk/28.2.13676358"
+          test -x "$ANDROID_HOME/cmake/3.31.6/bin/cmake"
+
+          java -version
+          "$ANDROID_HOME/cmake/3.31.6/bin/cmake" --version
+          "$ANDROID_HOME/ndk/28.2.13676358/ndk-build" --version || true
+
+      # -------------------------------------------------------
+      # Google Drive API
+      # -------------------------------------------------------
 
       - name: Install Google Drive API libraries
         shell: bash
@@ -225,19 +258,13 @@ jobs:
 
           df -h /
 
-      - name: Save Xbox 360 ISO cache
-        if: steps.iso-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/rb2.iso
-          key: rb2-iso-v1
-
       - name: Verify cached or downloaded ISO
         shell: bash
         run: |
-          set -eux
+          set -euo pipefail
 
           ISO="$RUNNER_TEMP/rb2.iso"
+          EXPECTED_SIZE=7838695424
 
           if [ ! -s "$ISO" ]; then
             echo "::error::ISO ausente ou vazia."
@@ -246,13 +273,20 @@ jobs:
 
           ACTUAL_SIZE="$(stat -c '%s' "$ISO")"
 
-          if [ "$ACTUAL_SIZE" != "7838695424" ]; then
+          if [ "$ACTUAL_SIZE" != "$EXPECTED_SIZE" ]; then
             echo "::error::Tamanho inesperado da ISO: $ACTUAL_SIZE bytes."
             exit 1
           fi
 
-          echo "ISO disponível: $ACTUAL_SIZE bytes"
+          echo "ISO verificada: $ACTUAL_SIZE bytes"
           df -h /
+
+      - name: Save Xbox 360 ISO cache
+        if: steps.iso-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/rb2.iso
+          key: rb2-iso-v1
 
       # -------------------------------------------------------
       # ReXGlue SDK cache
@@ -304,7 +338,7 @@ jobs:
           test -x "$THPS_SDK/out/linux-amd64/Release/rexglue"
 
       # -------------------------------------------------------
-      # Extract and validate the game
+      # Extract and validate game
       # -------------------------------------------------------
 
       - name: Extract Xbox 360 ISO
@@ -346,28 +380,33 @@ jobs:
           df -h /
 
       # -------------------------------------------------------
-      # Generate and compile Android game
+      # Generate game C++ code
       # -------------------------------------------------------
 
       - name: Generate game C++ code
         shell: bash
-        env:
-          THPS_SDK: ${{ github.workspace }}/.cache/rexglue-sdk-android
         run: |
           set -eux
 
-          bash tools/android/codegen.sh "$RUNNER_TEMP/rb2-game"
+          bash tools/android/codegen.sh "$RUNNER_TEMP/rb2-game" "$THPS_SDK"
+
+      # -------------------------------------------------------
+      # Build Android native libraries
+      # -------------------------------------------------------
 
       - name: Build Android native libraries
         shell: bash
         env:
           CC: clang-20
           CXX: clang++-20
-          THPS_SDK: ${{ github.workspace }}/.cache/rexglue-sdk-android
         run: |
           set -eux
 
           bash tools/android/build_native.sh
+
+      # -------------------------------------------------------
+      # Build APK
+      # -------------------------------------------------------
 
       - name: Build release APK
         shell: bash
@@ -382,6 +421,10 @@ jobs:
 
           echo "APK criado:"
           ls -lh "$APK"
+
+      # -------------------------------------------------------
+      # Upload APK artifact
+      # -------------------------------------------------------
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
