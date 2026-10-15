@@ -86,14 +86,14 @@ public class LauncherActivity extends Activity {
         frame.setBackgroundColor(Color.rgb(18, 18, 22));
         // The player's own game art when it has been taken from their installed copy (files/art), else the
         // build's art-res background (development builds only; public builds ship no game art).
-        java.io.File ownArt = NxeArt.backgroundFile(this);
-        int bgRes = getResources().getIdentifier("launcher_bg", "drawable", getPackageName());
-        android.graphics.Bitmap ownBitmap = ownArt.isFile()
-                ? android.graphics.BitmapFactory.decodeFile(ownArt.getPath()) : null;
-        int bg = gameInstalled() ? (ownBitmap != null ? 1 : bgRes) : 0;
+        
+        int bgRes = getResources().getIdentifier("launcher_custom_bg", "drawable", getPackageName());
+        
+                
+        int bg = gameInstalled() ? bgRes : 0;
         if (bg != 0) {
             ImageView art = new ImageView(this);
-            if (ownBitmap != null) art.setImageBitmap(ownBitmap); else art.setImageResource(bgRes);
+            art.setImageResource(bgRes);
             art.setScaleType(ImageView.ScaleType.CENTER_CROP);
             frame.addView(art, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
