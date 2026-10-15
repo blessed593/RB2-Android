@@ -12,12 +12,14 @@ NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
 CMAKE="$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/cmake"
 NINJA="$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/ninja"
 
+# Use o SDK informado pelo workflow.
 SDK="${THPS_SDK:-$(dirname "$REPO")/rexglue-sdk-android}"
 SDK_OUT="$SDK/out/android-arm64"
 
 BUILD_TYPE="${BUILD_TYPE:-RelWithDebInfo}"
 JOBS="${JOBS:-4}"
 
+# Verifica as ferramentas do Android.
 if [ ! -d "$NDK" ]; then
     echo "::error::Android NDK $NDK_VERSION não encontrado: $NDK"
     exit 1
@@ -33,6 +35,7 @@ if [ ! -x "$NINJA" ]; then
     exit 1
 fi
 
+# Verifica o SDK ReXGlue.
 if [ ! -f "$SDK/.android-patches/.applied" ]; then
     echo "::error::SDK ReXGlue não preparado: $SDK"
     exit 1
@@ -43,6 +46,7 @@ if [ ! -f "$SDK/CMakeLists.txt" ]; then
     exit 1
 fi
 
+# Configura o tipo de compilação.
 if [ "${PROBE_ONLY:-0}" = "1" ]; then
     OUT="$REPO/android/native-build/probe"
     EXTRA=(-DTHPS_GEN_DIR=/nonexistent)
@@ -63,7 +67,9 @@ find_first() {
     for root in "$@"; do
         [ -d "$root" ] || continue
 
-        found="$(find "$root" -type f -name "$pattern" -print -quit 2>/dev/null || true)"
+        found="$(
+            find "$root" -type f -name "$pattern" -print -quit 2>/dev/null || true
+        )"
 
         if [ -n "$found" ]; then
             printf '%s\n' "$found"
@@ -101,12 +107,15 @@ echo "Tipo de compilação: $BUILD_TYPE"
 echo "Paralelismo: $JOBS"
 echo "Probe somente: ${PROBE_ONLY:-0}"
 
+# IMPORTANTE:
+# THPS_SDK aponta explicitamente para o SDK preparado pelo workflow.
 "$CMAKE" \
     -S "$REPO/android/native" \
     -B "$OUT" \
     -G Ninja \
     -DCMAKE_MAKE_PROGRAM="$NINJA" \
     -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+    -DTHPS_SDK="$SDK" \
     -DANDROID_ABI=arm64-v8a \
     -DANDROID_PLATFORM=android-29 \
     -DANDROID_STL=c++_shared \
@@ -126,6 +135,7 @@ if [ "${PROBE_ONLY:-0}" = "1" ]; then
     stage "librb2probe.so"
 else
     echo "=== Preparando bibliotecas do jogo ==="
+
     stage "libmain.so"
     stage "librexruntime*.so"
     stage "librexgpu-xenos*.so"
@@ -142,6 +152,7 @@ else
     done
 fi
 
+# Copia a biblioteca padrão do C++ exigida pelo Android.
 CXX_SHARED="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 
 if [ ! -f "$CXX_SHARED" ]; then
@@ -152,6 +163,7 @@ fi
 cp "$CXX_SHARED" "$LIBS/"
 echo "Biblioteca copiada: libc++_shared.so"
 
+# Remove símbolos de depuração somente se solicitado.
 if [ "${STRIP:-0}" = "1" ]; then
     STRIP_TOOL="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
 
@@ -168,4 +180,5 @@ fi
 
 echo "=== Bibliotecas preparadas ==="
 find "$LIBS" -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
+
 echo "[OK] Bibliotecas preparadas em: $LIBS"
