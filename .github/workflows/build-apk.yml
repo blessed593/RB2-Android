@@ -21,7 +21,6 @@ jobs:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       THPS_SDK: ${{ github.workspace }}/.cache/rexglue-sdk-android
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
-
       JOBS: 4
       CMAKE_BUILD_PARALLEL_LEVEL: 4
 
@@ -92,7 +91,6 @@ jobs:
 
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
           chmod +x /tmp/llvm.sh
-
           sudo /tmp/llvm.sh 20
 
           clang-20 --version
@@ -272,15 +270,15 @@ jobs:
         run: |
           set -eux
 
-          mkdir -p .cache
+          mkdir -p "$GITHUB_WORKSPACE/.cache"
 
           bash tools/android/prepare_sdk.sh "$THPS_SDK"
 
           test -f "$THPS_SDK/CMakeLists.txt"
+          test -f "$THPS_SDK/.android-patches/.applied"
           test -f "$THPS_SDK/src/graphics/vulkan/direct_resolve_shaders.h"
 
-          echo "SDK preparado:"
-          echo "$THPS_SDK"
+          echo "SDK preparado: $THPS_SDK"
 
       - name: Save ReXGlue SDK cache
         if: success() && steps.sdk-cache.outputs.cache-hit != 'true'
@@ -301,7 +299,7 @@ jobs:
         run: |
           set -eux
 
-          bash tools/android/build_host_cli.sh
+          bash tools/android/build_host_cli.sh "$THPS_SDK"
 
           test -x "$THPS_SDK/out/linux-amd64/Release/rexglue"
 
@@ -315,7 +313,6 @@ jobs:
           set -eux
 
           GAME_DIR="$RUNNER_TEMP/rb2-game"
-
           mkdir -p "$GAME_DIR"
 
           python3 tools/android/xdvdfs.py \
@@ -327,11 +324,11 @@ jobs:
           echo "Arquivos extraídos:"
           find "$GAME_DIR" -maxdepth 2 -type f | head -80
 
-          echo "Tamanho do executável:"
-          stat -c '%s bytes' "$GAME_DIR/default.xex"
-
           ACTUAL_SIZE="$(stat -c '%s' "$GAME_DIR/default.xex")"
           ACTUAL_SHA1="$(sha1sum "$GAME_DIR/default.xex" | cut -d ' ' -f 1)"
+
+          echo "Tamanho do default.xex: $ACTUAL_SIZE bytes"
+          echo "SHA-1: $ACTUAL_SHA1"
 
           if [ "$ACTUAL_SIZE" != "7151616" ]; then
             echo "::error::O default.xex não corresponde ao tamanho esperado da versão USA Rev 1."
@@ -346,7 +343,6 @@ jobs:
           echo "ISO validada com sucesso."
 
           rm -f "$RUNNER_TEMP/rb2.iso"
-
           df -h /
 
       # -------------------------------------------------------
@@ -355,6 +351,8 @@ jobs:
 
       - name: Generate game C++ code
         shell: bash
+        env:
+          THPS_SDK: ${{ github.workspace }}/.cache/rexglue-sdk-android
         run: |
           set -eux
 
@@ -365,6 +363,7 @@ jobs:
         env:
           CC: clang-20
           CXX: clang++-20
+          THPS_SDK: ${{ github.workspace }}/.cache/rexglue-sdk-android
         run: |
           set -eux
 
