@@ -260,20 +260,13 @@ jobs:
           df -h /
 
       - name: Save Xbox 360 ISO cache
-        if: steps.iso-cache.outputs.cache-hit != 'true'
+        if: success() && steps.iso-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}/rb2.iso
           key: rb2-iso-v1
 
-      # ReXGlue SDK cache
-
-      - name: Restore ReXGlue SDK cache
-        id: sdk-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .cache/rexglue-sdk-android
-          key: rexglue-sdk-v1-${{ hashFiles('tools/android/prepare_sdk.sh', 'patches/rexglue-sdk-android/*.patch', 'tools/android/resolve_shaders/**') }}
+      # Prepare ReXGlue SDK without GitHub Actions SDK cache
 
       - name: Prepare SDK
         shell: bash
@@ -289,13 +282,6 @@ jobs:
           test -f "$THPS_SDK/src/graphics/vulkan/direct_resolve_shaders.h"
 
           echo "SDK preparado: $THPS_SDK"
-
-      - name: Save ReXGlue SDK cache
-        if: success() && steps.sdk-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: .cache/rexglue-sdk-android
-          key: rexglue-sdk-v1-${{ hashFiles('tools/android/prepare_sdk.sh', 'patches/rexglue-sdk-android/*.patch', 'tools/android/resolve_shaders/**') }}
 
       # Host code generation
 
