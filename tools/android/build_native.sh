@@ -4,7 +4,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
-ANDROID_HOME="${ANDROID_HOME:-$HOME/android-sdk}"
+ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
 NDK_VERSION="28.2.13676358"
 CMAKE_VERSION="3.31.6"
 
@@ -12,25 +12,36 @@ NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
 CMAKE="$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/cmake"
 NINJA="$ANDROID_HOME/cmake/$CMAKE_VERSION/bin/ninja"
 
+SDK="${THPS_SDK:-$(dirname "$REPO")/rexglue-sdk-android}"
+SDK_OUT="$SDK/out/android-arm64"
+
 BUILD_TYPE="${BUILD_TYPE:-RelWithDebInfo}"
-JOBS="${JOBS:-2}"
+JOBS="${JOBS:-4}"
 
 if [ ! -d "$NDK" ]; then
-    echo "ERRO: NDK $NDK_VERSION não encontrado em $ANDROID_HOME"
+    echo "::error::Android NDK $NDK_VERSION não encontrado: $NDK"
     exit 1
 fi
 
 if [ ! -x "$CMAKE" ]; then
-    echo "ERRO: CMake não encontrado: $CMAKE"
+    echo "::error::CMake não encontrado: $CMAKE"
     exit 1
 fi
 
 if [ ! -x "$NINJA" ]; then
-    echo "ERRO: Ninja não encontrado: $NINJA"
+    echo "::error::Ninja não encontrado: $NINJA"
     exit 1
 fi
 
-SDK_OUT="${THPS_SDK:-$(dirname "$REPO")/rexglue-sdk-android}/out/android-arm64"
+if [ ! -f "$SDK/.android-patches/.applied" ]; then
+    echo "::error::SDK ReXGlue não preparado: $SDK"
+    exit 1
+fi
+
+if [ ! -f "$SDK/CMakeLists.txt" ]; then
+    echo "::error::CMakeLists.txt não encontrado no SDK: $SDK"
+    exit 1
+fi
 
 if [ "${PROBE_ONLY:-0}" = "1" ]; then
     OUT="$REPO/android/native-build/probe"
@@ -70,7 +81,7 @@ stage() {
     file="$(find_first "$pattern" "$OUT" "$SDK_OUT" || true)"
 
     if [ -z "$file" ]; then
-        echo "ERRO: biblioteca não encontrada: $pattern"
+        echo "::error::Biblioteca não encontrada: $pattern"
         echo "Diretório de compilação: $OUT"
         echo "Diretório do SDK: $SDK_OUT"
         exit 1
@@ -81,8 +92,13 @@ stage() {
 }
 
 echo "=== Configurando compilação Android ==="
+echo "Repositório: $REPO"
+echo "SDK ReXGlue: $SDK"
 echo "NDK: $NDK"
+echo "CMake: $CMAKE"
 echo "Saída: $OUT"
+echo "Tipo de compilação: $BUILD_TYPE"
+echo "Paralelismo: $JOBS"
 echo "Probe somente: ${PROBE_ONLY:-0}"
 
 "$CMAKE" \
@@ -129,7 +145,7 @@ fi
 CXX_SHARED="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 
 if [ ! -f "$CXX_SHARED" ]; then
-    echo "ERRO: libc++_shared.so não encontrada: $CXX_SHARED"
+    echo "::error::libc++_shared.so não encontrada: $CXX_SHARED"
     exit 1
 fi
 
@@ -139,10 +155,17 @@ echo "Biblioteca copiada: libc++_shared.so"
 if [ "${STRIP:-0}" = "1" ]; then
     STRIP_TOOL="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
 
+    if [ ! -x "$STRIP_TOOL" ]; then
+        echo "::error::llvm-strip não encontrado: $STRIP_TOOL"
+        exit 1
+    fi
+
     for file in "$LIBS"/*.so; do
         [ -f "$file" ] || continue
         "$STRIP_TOOL" --strip-unneeded "$file"
     done
 fi
 
+echo "=== Bibliotecas preparadas ==="
+find "$LIBS" -maxdepth 1 -type f -name '*.so' -printf '%f\n' | sort
 echo "[OK] Bibliotecas preparadas em: $LIBS"
