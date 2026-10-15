@@ -19,7 +19,7 @@ jobs:
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      THPS_SDK: ${{ github.workspace }}/../rexglue-sdk-android
+      THPS_SDK: ${{ github.workspace }}/.cache/rexglue-sdk-android
       JAVA_HOME: /usr/lib/jvm/temurin-17-jdk-amd64
 
       JOBS: 4
@@ -125,6 +125,10 @@ jobs:
             google-api-python-client \
             google-auth
 
+      # -------------------------------------------------------
+      # Xbox 360 ISO cache
+      # -------------------------------------------------------
+
       - name: Restore Xbox 360 ISO cache
         id: iso-cache
         uses: actions/cache/restore@v4
@@ -161,11 +165,8 @@ jobs:
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaIoBaseDownload
 
-          credentials_json = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
-          file_id = os.environ["GOOGLE_DRIVE_FILE_ID"]
-
           credentials = service_account.Credentials.from_service_account_info(
-              json.loads(credentials_json),
+              json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]),
               scopes=["https://www.googleapis.com/auth/drive.readonly"],
           )
 
@@ -176,14 +177,16 @@ jobs:
               cache_discovery=False,
           )
 
+          file_id = os.environ["GOOGLE_DRIVE_FILE_ID"]
+
           metadata = drive.files().get(
               fileId=file_id,
               fields="id,name,size,mimeType",
               supportsAllDrives=True,
           ).execute()
 
-          print("Arquivo encontrado:", metadata.get("name", "sem nome"))
-          print("Tamanho informado:", metadata.get("size", "desconhecido"))
+          print("Arquivo:", metadata.get("name", "sem nome"))
+          print("Tamanho:", metadata.get("size", "desconhecido"))
 
           output = pathlib.Path(os.environ["RUNNER_TEMP"]) / "rb2.iso"
 
@@ -239,7 +242,7 @@ jobs:
           ISO="$RUNNER_TEMP/rb2.iso"
 
           if [ ! -s "$ISO" ]; then
-            echo "::error::ISO ausente ou vazia após download/restauração do cache."
+            echo "::error::ISO ausente ou vazia."
             exit 1
           fi
 
@@ -251,29 +254,44 @@ jobs:
           fi
 
           echo "ISO disponível: $ACTUAL_SIZE bytes"
-
           df -h /
+
+      # -------------------------------------------------------
+      # ReXGlue SDK cache
+      # -------------------------------------------------------
 
       - name: Restore ReXGlue SDK cache
         id: sdk-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ github.workspace }}/../rexglue-sdk-android
-          key: rexglue-sdk-v1-${{ hashFiles('patches/rexglue-sdk-android/*.patch', 'tools/android/prepare_sdk.sh', 'tools/android/resolve_shaders/**') }}
+          path: .cache/rexglue-sdk-android
+          key: rexglue-sdk-v1-${{ hashFiles('tools/android/prepare_sdk.sh', 'patches/rexglue-sdk-android/*.patch', 'tools/android/resolve_shaders/**') }}
 
       - name: Prepare SDK
         shell: bash
         run: |
           set -eux
 
-          bash tools/android/prepare_sdk.sh
+          mkdir -p .cache
+
+          bash tools/android/prepare_sdk.sh "$THPS_SDK"
+
+          test -f "$THPS_SDK/CMakeLists.txt"
+          test -f "$THPS_SDK/src/graphics/vulkan/direct_resolve_shaders.h"
+
+          echo "SDK preparado:"
+          echo "$THPS_SDK"
 
       - name: Save ReXGlue SDK cache
-        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        if: success() && steps.sdk-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ github.workspace }}/../rexglue-sdk-android
-          key: rexglue-sdk-v1-${{ hashFiles('patches/rexglue-sdk-android/*.patch', 'tools/android/prepare_sdk.sh', 'tools/android/resolve_shaders/**') }}
+          path: .cache/rexglue-sdk-android
+          key: rexglue-sdk-v1-${{ hashFiles('tools/android/prepare_sdk.sh', 'patches/rexglue-sdk-android/*.patch', 'tools/android/resolve_shaders/**') }}
+
+      # -------------------------------------------------------
+      # Host code generation
+      # -------------------------------------------------------
 
       - name: Build host code-generation tool
         shell: bash
@@ -286,6 +304,10 @@ jobs:
           bash tools/android/build_host_cli.sh
 
           test -x "$THPS_SDK/out/linux-amd64/Release/rexglue"
+
+      # -------------------------------------------------------
+      # Extract and validate the game
+      # -------------------------------------------------------
 
       - name: Extract Xbox 360 ISO
         shell: bash
@@ -327,6 +349,10 @@ jobs:
 
           df -h /
 
+      # -------------------------------------------------------
+      # Generate and compile Android game
+      # -------------------------------------------------------
+
       - name: Generate game C++ code
         shell: bash
         run: |
@@ -351,10 +377,12 @@ jobs:
 
           bash tools/android/build_apk.sh
 
-          test -s android/app/build/outputs/apk/release/app-release.apk
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+
+          test -s "$APK"
 
           echo "APK criado:"
-          ls -lh android/app/build/outputs/apk/release/app-release.apk
+          ls -lh "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
